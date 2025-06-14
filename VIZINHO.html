@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vizinho na Mão</title>
+    <!-- Inclui Tailwind CSS para estilização rápida e responsiva -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Define a fonte Inter como padrão -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Cor de fundo suave */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-3xl w-full bg-white p-8 rounded-xl shadow-lg space-y-8">
+        <h1 class="text-3xl font-extrabold text-center text-gray-900 mb-6">Vizinho na Mão</h1>
+        <p class="text-center text-sm text-gray-600 mb-6">
+            Conecte-se com seus vizinhos para ajuda rápida e local.
+        </p>
+
+        <!-- Exibe o ID do usuário atual -->
+        <div class="text-center text-sm text-gray-700 mb-4 p-2 bg-blue-100 rounded-md">
+            Seu ID de Usuário (para encontrar outros vizinhos): <span id="userIdDisplay" class="font-bold text-blue-800 break-all">Carregando...</span>
+        </div>
+
+        <!-- Formulário para Criar um Novo Pedido de Ajuda -->
+        <div class="bg-blue-50 p-6 rounded-lg shadow-inner">
+            <h2 class="text-xl font-semibold text-blue-800 mb-4">Pedir Ajuda Rápida</h2>
+            <form id="helpRequestForm" class="space-y-4">
+                <div>
+                    <label for="requestTitle" class="block text-sm font-medium text-gray-700">Título do Pedido (Ex: Preciso de um saca-rolhas)</label>
+                    <input type="text" id="requestTitle" name="requestTitle" required
+                           class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                </div>
+                <div>
+                    <label for="requestDescription" class="block text-sm font-medium text-gray-700">Descrição (O que você precisa?)</label>
+                    <textarea id="requestDescription" name="requestDescription" rows="3" required
+                              class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea>
+                </div>
+                <div>
+                    <label for="requestLocation" class="block text-sm font-medium text-gray-700">Sua Localização Aproximada (Ex: Apt 101, Bloco B)</label>
+                    <input type="text" id="requestLocation" name="requestLocation" required
+                           class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                </div>
+                <button type="submit"
+                        class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out">
+                    Pedir Ajuda
+                </button>
+            </form>
+        </div>
+
+        <!-- Seção para Exibir Pedidos de Ajuda Ativos -->
+        <div class="bg-gray-50 p-6 rounded-lg shadow-inner">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Pedidos de Ajuda Ativos</h2>
+            <div id="requestsList" class="space-y-4">
+                <!-- Os pedidos de ajuda serão carregados aqui pelo JavaScript -->
+                <p id="noRequestsMessage" class="text-center text-gray-500">Nenhum pedido de ajuda ativo no momento.</p>
+            </div>
+            <div id="loadingIndicator" class="text-center text-gray-500 mt-4 hidden">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 inline-block"></div>
+                <p>Carregando pedidos...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Mensagens Personalizado (substitui alert/confirm) -->
+    <div id="messageModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full text-center">
+            <p id="modalMessage" class="text-lg font-medium text-gray-800 mb-4"></p>
+            <button id="modalCloseButton"
+                    class="px-6 py-2 rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                OK
+            </button>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        // Importa os módulos necessários do Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        // Variáveis globais do Firebase (fornecidas pelo ambiente Canvas)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Referências aos elementos do DOM
+        const helpRequestForm = document.getElementById('helpRequestForm');
+        const requestsList = document.getElementById('requestsList');
+        const noRequestsMessage = document.getElementById('noRequestsMessage');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const messageModal = document.getElementById('messageModal');
+        const modalMessage = document.getElementById('modalMessage');
+        const modalCloseButton = document.getElementById('modalCloseButton');
+
+        let app;
+        let db;
+        let auth;
+        let currentUserId = null; // Armazena o ID do usuário logado
+
+        // Função para exibir o modal de mensagens personalizado
+        function showMessage(message) {
+            modalMessage.textContent = message;
+            messageModal.classList.remove('hidden');
+            messageModal.classList.add('flex');
+        }
+
+        // Event listener para fechar o modal
+        modalCloseButton.addEventListener('click', () => {
+            messageModal.classList.add('hidden');
+            messageModal.classList.remove('flex');
+        });
+
+        // Inicializa o Firebase e a autenticação
+        const initializeFirebase = async () => {
+            loadingIndicator.classList.remove('hidden'); // Mostra o indicador de carregamento
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Tenta autenticar com o token inicial fornecido pelo ambiente
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // Se não houver token, autentica anonimamente
+                    await signInAnonymously(auth);
+                }
+
+                // Observa o estado de autenticação para obter o ID do usuário
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                        userIdDisplay.textContent = currentUserId;
+                        console.log("Usuário autenticado com ID:", currentUserId);
+                        // Inicia a escuta por pedidos de ajuda após a autenticação
+                        setupRealtimeRequestsListener();
+                    } else {
+                        console.log("Nenhum usuário autenticado.");
+                        userIdDisplay.textContent = "N/A (Erro de Autenticação)";
+                    }
+                    loadingIndicator.classList.add('hidden'); // Esconde o indicador de carregamento
+                });
+
+            } catch (error) {
+                console.error("Erro ao inicializar Firebase ou autenticar:", error);
+                showMessage("Erro ao carregar o aplicativo. Tente novamente.");
+                loadingIndicator.classList.add('hidden'); // Esconde o indicador de carregamento
+            }
+        };
+
+        // Função para adicionar um novo pedido de ajuda ao Firestore
+        helpRequestForm.addEventListener('submit', async (e) => {
+            e.preventDefault(); // Impede o recarregamento da página
+
+            if (!currentUserId) {
+                showMessage("Erro: Usuário não autenticado. Tente recarregar a página.");
+                return;
+            }
+
+            const title = document.getElementById('requestTitle').value;
+            const description = document.getElementById('requestDescription').value;
+            const location = document.getElementById('requestLocation').value;
+
+            try {
+                // Adiciona um novo documento à coleção 'help_requests'
+                // O caminho da coleção é /artifacts/{appId}/public/data/help_requests
+                const docRef = await addDoc(collection(db, `artifacts/${appId}/public/data/help_requests`), {
+                    title: title,
+                    description: description,
+                    location: location,
+                    requesterId: currentUserId, // ID do usuário que fez o pedido
+                    status: 'aberto', // Status inicial do pedido
+                    timestamp: new Date(), // Carimbo de data/hora da criação
+                    helperId: null // Ninguém aceitou ainda
+                });
+                console.log("Documento escrito com ID: ", docRef.id);
+                helpRequestForm.reset(); // Limpa o formulário
+                showMessage("Seu pedido de ajuda foi publicado!");
+            } catch (e) {
+                console.error("Erro ao adicionar documento: ", e);
+                showMessage("Erro ao publicar o pedido. Tente novamente.");
+            }
+        });
+
+        // Função para configurar o listener de tempo real para pedidos de ajuda
+        const setupRealtimeRequestsListener = () => {
+            if (!db) {
+                console.error("Firestore não inicializado.");
+                return;
+            }
+
+            const q = query(collection(db, `artifacts/${appId}/public/data/help_requests`), orderBy("timestamp", "desc"));
+
+            onSnapshot(q, (snapshot) => {
+                requestsList.innerHTML = ''; // Limpa a lista existente
+                let hasRequests = false;
+
+                snapshot.forEach((doc) => {
+                    hasRequests = true;
+                    const request = doc.data();
+                    const requestId = doc.id;
+                    const isMyRequest = request.requesterId === currentUserId;
+                    const isAccepted = request.status === 'aceito';
+                    const isCompleted = request.status === 'concluido';
+
+                    // Formata a data de forma legível
+                    const date = request.timestamp ? new Date(request.timestamp.toDate()).toLocaleString() : 'Data desconhecida';
+
+                    // Cria o elemento HTML para cada pedido
+                    const requestElement = document.createElement('div');
+                    requestElement.className = `p-4 rounded-lg shadow-md ${isMyRequest ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'}`;
+                    requestElement.innerHTML = `
+                        <h3 class="text-lg font-bold text-gray-900">${request.title}</h3>
+                        <p class="text-sm text-gray-700 mt-1">${request.description}</p>
+                        <p class="text-xs text-gray-500 mt-2">Local: ${request.location}</p>
+                        <p class="text-xs text-gray-500">Publicado em: ${date}</p>
+                        <p class="text-xs text-gray-500">Status: <span class="font-semibold ${isAccepted ? 'text-blue-600' : (isCompleted ? 'text-green-600' : 'text-orange-500')}">${request.status.charAt(0).toUpperCase() + request.status.slice(1)}</span></p>
+                        <p class="text-xs text-gray-500">Quem pediu: <span class="font-mono text-gray-800 break-all">${request.requesterId}</span></p>
+                        ${request.helperId ? `<p class="text-xs text-blue-700">Quem aceitou: <span class="font-mono break-all">${request.helperId}</span></p>` : ''}
+                        <div class="mt-3 flex gap-2">
+                            ${!isMyRequest && !isAccepted && !isCompleted ? `
+                                <button class="accept-request-btn px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-md hover:bg-purple-700 transition duration-150 ease-in-out" data-id="${requestId}">
+                                    Aceitar Ajuda
+                                </button>
+                            ` : ''}
+                            ${isMyRequest && !isCompleted ? `
+                                <button class="complete-request-btn px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-md hover:bg-teal-700 transition duration-150 ease-in-out" data-id="${requestId}">
+                                    Marcar como Concluído
+                                </button>
+                            ` : ''}
+                            ${!isMyRequest && isAccepted && request.helperId === currentUserId && !isCompleted ? `
+                                <button class="complete-request-btn px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-md hover:bg-teal-700 transition duration-150 ease-in-out" data-id="${requestId}">
+                                    Marcar como Concluído (Eu ajudei)
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                    requestsList.appendChild(requestElement);
+                });
+
+                // Mostra ou esconde a mensagem de "nenhum pedido"
+                if (hasRequests) {
+                    noRequestsMessage.classList.add('hidden');
+                } else {
+                    noRequestsMessage.classList.remove('hidden');
+                }
+
+                // Adiciona event listeners aos botões "Aceitar" e "Concluído"
+                document.querySelectorAll('.accept-request-btn').forEach(button => {
+                    button.addEventListener('click', async (e) => {
+                        const requestId = e.target.dataset.id;
+                        try {
+                            await updateDoc(doc(db, `artifacts/${appId}/public/data/help_requests`, requestId), {
+                                status: 'aceito',
+                                helperId: currentUserId
+                            });
+                            showMessage("Você aceitou ajudar com este pedido!");
+                        } catch (error) {
+                            console.error("Erro ao aceitar pedido:", error);
+                            showMessage("Erro ao aceitar o pedido. Tente novamente.");
+                        }
+                    });
+                });
+
+                document.querySelectorAll('.complete-request-btn').forEach(button => {
+                    button.addEventListener('click', async (e) => {
+                        const requestId = e.target.dataset.id;
+                        try {
+                            await updateDoc(doc(db, `artifacts/${appId}/public/data/help_requests`, requestId), {
+                                status: 'concluido'
+                            });
+                            showMessage("Pedido marcado como concluído!");
+                        } catch (error) {
+                            console.error("Erro ao marcar como concluído:", error);
+                            showMessage("Erro ao marcar como concluído. Tente novamente.");
+                        }
+                    });
+                });
+
+            }, (error) => {
+                console.error("Erro ao obter dados em tempo real:", error);
+                showMessage("Erro ao carregar os pedidos de ajuda. Verifique sua conexão.");
+            });
+        };
+
+        // Inicia o processo de inicialização do Firebase quando a janela é carregada
+        window.onload = initializeFirebase;
+    </script>
+</body>
+</html>
